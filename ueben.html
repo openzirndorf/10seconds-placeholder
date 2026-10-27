@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>10 Sekunden üben – Stoppe die Uhr blind bei 10,000 s</title>
+  <meta name="description" content="Online-Spiel fürs Zeitgefühl: Uhr starten, nach 2–3 Sekunden verschwindet die Anzeige – stoppe genau bei 10,000 Sekunden. Kostenlos, ohne Anmeldung, auch am Handy." />
+  <link rel="canonical" href="https://10sekunden.openzirndorf.de/ueben.html" />
+  <meta name="robots" content="index, follow" />
+  <link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="de_DE" />
+  <meta property="og:site_name" content="10 Sekunden · OpenZirndorf e.V." />
+  <meta property="og:title" content="10 Sekunden üben – Stoppe die Uhr blind bei 10,000 s" />
+  <meta property="og:description" content="Online-Spiel fürs Zeitgefühl: Uhr starten, nach 2–3 Sekunden verschwindet die Anzeige – stoppe genau bei 10,000 Sekunden. Kostenlos, ohne Anmeldung, auch am Handy." />
+  <meta property="og:url" content="https://10sekunden.openzirndorf.de/ueben.html" />
+  <meta property="og:image" content="https://10sekunden.openzirndorf.de/images/og-vorschau.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Der OpenZirndorf-Waschbär drückt einen Buzzer, daneben „10 Sekunden“" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebApplication", "name": "10 Sekunden – Übungsmodus", "url": "https://10sekunden.openzirndorf.de/ueben.html", "applicationCategory": "GameApplication", "operatingSystem": "Browser", "inLanguage": "de", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "EUR"}, "publisher": {"@type": "Organization", "name": "OpenZirndorf e.V.", "url": "https://openzirndorf.de/", "email": "team@openzirndorf.de", "address": {"@type": "PostalAddress", "streetAddress": "Erich-Kästner-Weg 33", "postalCode": "90513", "addressLocality": "Zirndorf", "addressCountry": "DE"}}}</script>
+  <meta name="theme-color" content="#009A00" />
+  <link rel="icon" href="images/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+  <main class="wrap practice">
+    <header class="head">
+      <div>
+        <p class="kicker">OpenZirndorf e.V. · Übungsmodus</p>
+        <h1><span class="title-num">10</span> Sekunden</h1>
+      </div>
+    </header>
+    <p class="lead">Starte die Uhr, warte im Blindflug und stoppe <strong>genau</strong> bei 10,000&nbsp;s.</p>
+
+    <div class="stage" id="stage" tabindex="0" role="button" aria-label="Spielfläche – Enter, Leertaste oder Tippen zum Starten und Stoppen">
+      <img class="mascot" src="images/waschbaer-buzzer.png" alt="Der OpenZirndorf-Waschbär drückt einen roten Buzzer" />
+      <div class="timer" id="timer" aria-live="off"><span id="timer-value">0.000</span><small>&nbsp;s</small></div>
+      <div class="result" id="result" hidden>
+        <span class="result-time" id="result-time"></span>
+        <span class="result-dev" id="result-dev"></span>
+        <p class="result-rating" id="result-rating"></p>
+        <p class="result-best" id="result-best" hidden>⭐ Neuer persönlicher Bestwert!</p>
+      </div>
+      <p class="hint" id="hint">Tippen, Enter oder Leertaste zum Start</p>
+    </div>
+
+    <div class="mystats" id="mystats" aria-live="polite"></div>
+    <p class="lead" style="margin-top:1rem"><a class="btn ghost" href="./">← Zum Endstand der Aktion</a></p>
+  </main>
+
+  <footer class="foot">
+    🦝 Ein Spiel von <strong>OpenZirndorf e.V.</strong> · Deine Übungswerte bleiben nur in diesem Browser · <a href="impressum.html">Impressum &amp; Datenschutz</a>
+  </footer>
+
+  <script>
+  (() => {
+    // Reiner Übungsmodus: keine Preise, keine Rangliste, kein Server.
+    // Eigene Statistik nur in localStorage dieses Browsers.
+    const TARGET_MS = 10000;
+    const LOCK_MS = 800;           // nach dem Stopp kurz sperren (Doppeltippen)
+    const KEY = 'zehnsek_uebung_v1';
+
+    const stage = document.getElementById('stage');
+    const timer = document.getElementById('timer');
+    const timerValue = document.getElementById('timer-value');
+    const hint = document.getElementById('hint');
+    const result = document.getElementById('result');
+    const resultTime = document.getElementById('result-time');
+    const resultDev = document.getElementById('result-dev');
+    const resultRating = document.getElementById('result-rating');
+    const resultBest = document.getElementById('result-best');
+    const mystats = document.getElementById('mystats');
+
+    let state = 'idle'; // idle | visible | hidden | result
+    let start = 0, stoppedAt = 0, raf = null, revealTimer = null;
+
+    const fmt = (ms) => (ms / 1000).toFixed(3);
+    const fmtDe = (ms) => fmt(ms).replace('.', ',');
+
+    function load() {
+      try { const v = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(v) ? v : []; } catch { return []; }
+    }
+    function save(list) {
+      try { localStorage.setItem(KEY, JSON.stringify(list.slice(-500))); } catch { /* privater Modus o. Ä. */ }
+    }
+    let devs = load();
+
+    function rating(dev, elapsed) {
+      if (fmt(elapsed) === '10.000') return '💎 Exakt 10,000 s – unglaublich!';
+      if (dev <= 50) return '🎯 Wahnsinn – fast perfekt!';
+      if (dev <= 100) return '🔥 Extrem nah dran!';
+      if (dev <= 400) return '👏 Sehr gut!';
+      if (dev <= 1000) return '🙂 Ordentlich nah dran.';
+      if (dev <= 2500) return '🤔 Ausbaufähig – nochmal?';
+      return '😅 Weit daneben – nochmal versuchen!';
+    }
+
+    function renderStats() {
+      mystats.innerHTML = '';
+      if (!devs.length) return;
+      const sorted = [...devs].sort((a, b) => a - b);
+      const median = sorted[Math.floor((sorted.length - 1) / 2)];
+      const add = (html) => { const s = document.createElement('span'); s.innerHTML = html; mystats.append(s); };
+      add(`Versuche: <strong>${devs.length}</strong>`);
+      add(`Bestwert: <strong>±${fmtDe(sorted[0])} s</strong>`);
+      add(`Typisch: <strong>±${fmtDe(median)} s</strong>`);
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.textContent = 'zurücksetzen';
+      reset.addEventListener('click', (e) => { e.stopPropagation(); devs = []; save(devs); renderStats(); });
+      mystats.append(reset);
+    }
+
+    function tick() {
+      timerValue.textContent = fmt(performance.now() - start);
+      raf = requestAnimationFrame(tick);
+    }
+
+    function startRound() {
+      state = 'visible';
+      start = performance.now();
+      // Zufällige Wobbel-Dauer, damit der Waschbär kein heimlicher Sekundentakt ist
+      stage.style.setProperty('--sniff', `${(0.7 + Math.random() * 0.9).toFixed(2)}s`);
+      stage.classList.add('is-running');
+      stage.classList.remove('is-result');
+      result.hidden = true;
+      timer.hidden = false;
+      timer.classList.remove('is-hidden');
+      hint.textContent = 'Merk dir das Gefühl für 10 Sekunden …';
+      raf = requestAnimationFrame(tick);
+      revealTimer = setTimeout(() => {
+        if (state !== 'visible') return;
+        state = 'hidden';
+        timer.classList.add('is-hidden');
+        hint.textContent = 'Jetzt bei genau 10,000 s stoppen!';
+      }, (2 + Math.random()) * 1000);
+    }
+
+    function stopRound() {
+      const elapsed = performance.now() - start;
+      cancelAnimationFrame(raf);
+      clearTimeout(revealTimer);
+      state = 'result';
+      stoppedAt = performance.now();
+      const dev = Math.abs(elapsed - TARGET_MS);
+      const best = devs.length ? Math.min(...devs) : Infinity;
+      devs.push(Math.round(dev));
+      save(devs);
+
+      stage.classList.remove('is-running');
+      stage.classList.add('is-result');
+      timer.hidden = true;
+      result.hidden = false;
+      resultTime.textContent = `${fmtDe(elapsed)} s`;
+      resultDev.textContent = `Abweichung ${elapsed >= TARGET_MS ? '+' : '−'}${fmtDe(dev)} s`;
+      resultRating.textContent = rating(dev, elapsed);
+      resultBest.hidden = !(devs.length > 1 && dev < best);
+      hint.textContent = 'Tippen, Enter oder Leertaste für die nächste Runde';
+      renderStats();
+    }
+
+    function reset() {
+      state = 'idle';
+      stage.classList.remove('is-running', 'is-result');
+      timer.hidden = false;
+      timer.classList.remove('is-hidden');
+      timerValue.textContent = '0.000';
+      result.hidden = true;
+      hint.textContent = 'Tippen, Enter oder Leertaste zum Start';
+    }
+
+    function activate() {
+      if (state === 'idle') startRound();
+      else if (state === 'visible' || state === 'hidden') stopRound();
+      else if (performance.now() - stoppedAt > LOCK_MS) reset();
+    }
+
+    stage.addEventListener('click', activate);
+    document.addEventListener('keydown', (e) => {
+      if ((e.key !== 'Enter' && e.key !== ' ') || e.repeat) return;
+      if (e.target.closest && e.target.closest('a, button')) return;
+      e.preventDefault();
+      activate();
+    });
+
+    renderStats();
+    stage.focus({ preventScroll: true });
+  })();
+  </script>
+</body>
+</html>
